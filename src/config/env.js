@@ -1,0 +1,82 @@
+/**
+ * Environment Configuration
+ * Centralized configuration management
+ */
+
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+export const config = {
+  // Server Configuration
+  port: process.env.PORT || 3000,
+  nodeEnv: process.env.NODE_ENV || 'development',
+
+  // Supabase Configuration
+  supabase: {
+    url: process.env.SUPABASE_URL,
+    anonKey: process.env.SUPABASE_ANON_KEY,
+  },
+
+  // Retell AI Configuration
+  retell: {
+    apiKey: process.env.RETELL_API_KEY,
+    agentId: process.env.RETELL_AGENT_ID,
+    phoneNumber: process.env.RETELL_PHONE_NUMBER,
+  },
+
+  // OpenAI Configuration
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY,
+    model: process.env.OPENAI_MODEL || 'gpt-4',
+    visionModel: process.env.OPENAI_VISION_MODEL || 'gpt-4o', // gpt-4o or gpt-4-vision-preview
+    temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7'),
+  },
+
+
+  // Pinecone Configuration
+  pinecone: {
+    apiKey: process.env.PINECONE_API_KEY,
+    environment: process.env.PINECONE_ENVIRONMENT,
+    indexName: process.env.PINECONE_INDEX_NAME || 'home-maintenance-docs',
+  },
+
+  // Emergency Configuration
+  emergency: {
+    phoneNumber: process.env.EMERGENCY_TRANSFER_NUMBER,
+  },
+
+  // Email Configuration
+  email: {
+    service: process.env.EMAIL_SERVICE || 'gmail',
+    host: process.env.EMAIL_HOST,
+    port: parseInt(process.env.EMAIL_PORT || '587'),
+    secure: process.env.EMAIL_SECURE === 'true',
+    user: process.env.EMAIL_USER,
+    password: process.env.EMAIL_PASSWORD,
+    from: process.env.EMAIL_FROM,
+    to: process.env.EMAIL_TO || process.env.EMAIL_USER,
+  },
+};
+
+/**
+ * Validate required environment variables
+ */
+export function validateConfig() {
+  const required = [
+    'SUPABASE_URL',
+    'SUPABASE_ANON_KEY',
+    'OPENAI_API_KEY',
+  ];
+
+  const missing = required.filter(key => !process.env[key]);
+
+  if (missing.length > 0) {
+    console.error('❌ Missing required environment variables:');
+    missing.forEach(key => console.error(`   - ${key}`));
+    return false;
+  }
+
+  return true;
+}
+
