@@ -249,28 +249,20 @@ export function handleWebSocketConnection(ws, callId) {
         let transferNumber = null;
         let transferReason = null;
         
-        logger.log(PREFIX, `🔍 Checking ${result.messages.length} messages for emergency signal...`);
-        
+        // Check messages for emergency transfer signal
         for (const msg of result.messages) {
           const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-          
-          // Debug: Log message type and content preview
-          const msgType = msg.constructor.name;
-          const preview = content.substring(0, 100);
-          logger.log(PREFIX, `  - ${msgType}: "${preview}${content.length > 100 ? '...' : ''}"`);
           
           if (content.startsWith('EMERGENCY_TRANSFER:')) {
             emergencyTransferDetected = true;
             const parts = content.split(':');
             transferNumber = parts[1];
             transferReason = parts[2] || 'Emergency situation';
-            logger.success(PREFIX, `✓ Emergency transfer detected! Number: ${transferNumber}, Reason: ${transferReason}`);
+            logger.success(PREFIX, `🚨 EMERGENCY TRANSFER SIGNAL DETECTED!`);
+            logger.info(PREFIX, `   Number: ${transferNumber}`);
+            logger.info(PREFIX, `   Reason: ${transferReason}`);
             break;
           }
-        }
-        
-        if (!emergencyTransferDetected) {
-          logger.log(PREFIX, '  No emergency transfer signal found in messages');
         }
         
         // Extract AI response
@@ -279,12 +271,6 @@ export function handleWebSocketConnection(ws, callId) {
         
         // Handle emergency transfer if detected
         if (emergencyTransferDetected) {
-          if (transferInProgress) {
-            logger.warn(PREFIX, '⚠️ Transfer already in progress, ignoring duplicate request');
-            // Still send a response to acknowledge
-            sendResponse(ws, "The transfer is in progress. Please stay on the line.", data.response_id);
-            return;
-          }
           // Determine transfer type from reason
           const isUrgentMaintenance = transferReason.startsWith('urgent_maintenance');
           const isHumanAgentRequest = transferReason === 'human_agent_requested';
@@ -302,33 +288,34 @@ export function handleWebSocketConnection(ws, callId) {
             logger.warn(PREFIX, `🚨 EMERGENCY DETECTED: ${displayReason}`);
           }
           
+          // Check if transfer already happened
+          if (transferInProgress) {
+            logger.warn(PREFIX, '⚠️ Transfer already initiated, sending acknowledgment only');
+            sendResponse(ws, "The transfer is in progress. Please stay on the line.", data.response_id);
+            return;
+          }
+          
+          // Mark that transfer is in progress BEFORE sending (prevent race conditions)
+          transferInProgress = true;
+          logger.log(PREFIX, '🔒 Transfer flag set');
+          
           // Mark emergency for email summary (only for actual emergencies, not human agent requests)
           if (!isHumanAgentRequest) {
             emergencyDetected = true;
             emergencyReason = displayReason;
           }
           
-          transferInProgress = true; // Prevent multiple transfers
-          
           try {
             // CRITICAL: Send transfer IMMEDIATELY - don't wait for anything else!
-            logger.info(PREFIX, `Initiating call transfer to: ${transferNumber}`);
-            sendDirectTransfer(ws, data.response_id, transferNumber, responseText);
-            logger.success(PREFIX, `✓ Transfer command sent`);
+            logger.info(PREFIX, `🚀 SENDING TRANSFER COMMAND`);
+            logger.info(PREFIX, `📞 Destination: ${transferNumber}`);
+            logger.info(PREFIX, `🆔 Response ID: ${data.response_id}`);
+            logger.info(PREFIX, `💬 Response Text: "${responseText}"`);
+            logger.info(PREFIX, `🌐 WebSocket State: ${ws.readyState} (1=OPEN, 2=CLOSING, 3=CLOSED)`);
             
-            // Send alert email AFTER transfer (async, don't block)
-            // Email can be sent in background - transfer is time-critical!
-            if (!isHumanAgentRequest) {
-              const { sendEmergencyAlert } = await import('../services/email.service.js');
-              sendEmergencyAlert({
-                callId,
-                userPhone: userPhoneNumber,
-                reason: displayReason,
-                emergencyNumber: transferNumber,
-                isUrgentMaintenance,
-              }).catch(err => logger.error(PREFIX, 'Failed to send alert email:', err));
-              // Note: No await - let it send in background
-            }
+            sendDirectTransfer(ws, data.response_id, transferNumber, responseText);
+            
+            logger.success(PREFIX, `✅ TRANSFER COMMAND SENT TO RETELL`);
             
             // Add to conversation state for email summary
             conversationState.messages.push(new AIMessage(responseText + ' [CALL TRANSFERRED]'));
@@ -357,6 +344,22 @@ export function handleWebSocketConnection(ws, callId) {
             
             sendResponse(ws, fallbackMessage, data.response_id);
             conversationState.messages.push(new AIMessage(fallbackMessage));
+          }
+          
+          // Send email alert in background (completely async, won't block anything)
+          // This runs AFTER transfer is complete, in fire-and-forget mode
+          if (!isHumanAgentRequest) {
+            import('../services/email.service.js')
+              .then(({ sendEmergencyAlert }) => {
+                return sendEmergencyAlert({
+                  callId,
+                  userPhone: userPhoneNumber,
+                  reason: displayReason,
+                  emergencyNumber: transferNumber,
+                  isUrgentMaintenance,
+                });
+              })
+              .catch(err => logger.error(PREFIX, 'Background email failed:', err));
           }
           
           return;

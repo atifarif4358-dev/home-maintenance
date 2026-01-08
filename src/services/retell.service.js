@@ -120,10 +120,20 @@ export function sendErrorResponse(ws, responseId = 0) {
  */
 export function sendDirectTransfer(ws, responseId, phoneNumber, message = null) {
   try {
+    // Check if WebSocket is open
+    if (!ws || ws.readyState !== 1) {
+      logger.error(PREFIX, `❌ WebSocket not open! ReadyState: ${ws?.readyState || 'undefined'}`);
+      throw new Error('WebSocket not open');
+    }
+    
+    logger.log(PREFIX, `✓ WebSocket is OPEN (readyState: ${ws.readyState})`);
+    
     // 1. Validate E.164
     if (!validateE164(phoneNumber)) {
+      logger.warn(PREFIX, `Phone number not in E.164 format: ${phoneNumber}, formatting...`);
       phoneNumber = formatToE164(phoneNumber);
     }
+    logger.log(PREFIX, `✓ Phone number validated: ${phoneNumber}`);
 
     const defaultMessage = "I'm transferring you to our emergency support team now. Please stay on the line.";
     const finalMessage = message || defaultMessage;
@@ -139,8 +149,11 @@ export function sendDirectTransfer(ws, responseId, phoneNumber, message = null) 
       transfer_number: phoneNumber // <--- This is the key field for Custom LLM
     };
     
+    logger.log(PREFIX, `📤 Sending transfer payload:`, JSON.stringify(transferResponse, null, 2));
+    
     ws.send(JSON.stringify(transferResponse));
-    logger.success(PREFIX, `✓ Transfer command sent. Destination: ${phoneNumber}`);
+    
+    logger.success(PREFIX, `✅ Transfer command sent successfully! Destination: ${phoneNumber}`);
     
   } catch (error) {
     logger.error(PREFIX, 'Failed to send direct transfer:', error);
