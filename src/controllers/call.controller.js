@@ -311,35 +311,24 @@ export function handleWebSocketConnection(ws, callId) {
           transferInProgress = true; // Prevent multiple transfers
           
           try {
-            // Send alert email only for emergencies (not for human agent requests)
+            // CRITICAL: Send transfer IMMEDIATELY - don't wait for anything else!
+            logger.info(PREFIX, `Initiating call transfer to: ${transferNumber}`);
+            sendDirectTransfer(ws, data.response_id, transferNumber, responseText);
+            logger.success(PREFIX, `✓ Transfer command sent`);
+            
+            // Send alert email AFTER transfer (async, don't block)
+            // Email can be sent in background - transfer is time-critical!
             if (!isHumanAgentRequest) {
               const { sendEmergencyAlert } = await import('../services/email.service.js');
-              await sendEmergencyAlert({
+              sendEmergencyAlert({
                 callId,
                 userPhone: userPhoneNumber,
                 reason: displayReason,
                 emergencyNumber: transferNumber,
                 isUrgentMaintenance,
               }).catch(err => logger.error(PREFIX, 'Failed to send alert email:', err));
-            } else {
-              logger.log(PREFIX, 'Human agent request - no emergency email needed');
+              // Note: No await - let it send in background
             }
-            
-            // Use direct transfer (no Retell LLM tools required)
-            logger.info(PREFIX, `Initiating call transfer to: ${transferNumber}`);
-            
-            // Let the AI's response be sent (it already said the right thing)
-            // We don't override the message here - the AI tool already told them what's happening
-            
-            // The AI has already said something like:
-            // "I'm transferring you to our emergency response team immediately. Please stay on the line."
-            // OR
-            // "This needs immediate professional attention. I'm transferring you to our emergency maintenance team..."
-            
-            // Just send the transfer
-            sendDirectTransfer(ws, data.response_id, transferNumber, responseText);
-            
-            logger.success(PREFIX, `✓ Transfer command sent`);
             
             // Add to conversation state for email summary
             conversationState.messages.push(new AIMessage(responseText + ' [CALL TRANSFERRED]'));
