@@ -4,7 +4,9 @@
  */
 
 import fs from 'fs/promises';
-import pdfParse from 'pdf-parse';
+// import pdfParse from 'pdf-parse';
+// import pdfParse from 'pdf-parse';
+import * as pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import { logger } from '../utils/logger.js';
 
@@ -18,7 +20,9 @@ const PREFIX = 'FileProcessor';
 async function extractTextFromPDF(filePath) {
   try {
     const dataBuffer = await fs.readFile(filePath);
-    const data = await pdfParse(dataBuffer);
+    // const data = await pdfParse(dataBuffer);
+    // const data = await pdfParse(dataBuffer);
+    const data = await pdfParse.default(dataBuffer);
     logger.success(PREFIX, `Extracted ${data.text.length} characters from PDF`);
     return data.text;
   } catch (error) {
