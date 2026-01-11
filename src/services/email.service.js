@@ -1,39 +1,34 @@
 /**
  * Email Service
- * Sends call summaries and notifications via email
+ * Sends call summaries and notifications via email using Resend
  */
 
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
 const PREFIX = 'Email';
 
-// Create reusable transporter
-let transporter = null;
+// Initialize Resend client
+let resendClient = null;
 
 /**
- * Initialize email transporter
+ * Initialize Resend client
  */
-function initializeTransporter() {
-  if (transporter) return transporter;
+function initializeResend() {
+  if (resendClient) return resendClient;
 
   try {
-    transporter = nodemailer.createTransport({
-      service: config.email.service,
-      host: config.email.host,
-      port: config.email.port,
-      secure: config.email.secure,
-      auth: {
-        user: config.email.user,
-        pass: config.email.password,
-      },
-    });
+    if (!config.email.apiKey) {
+      logger.warn(PREFIX, 'Resend API key not configured');
+      return null;
+    }
 
-    logger.log(PREFIX, `Email transporter initialized (${config.email.service})`);
-    return transporter;
+    resendClient = new Resend(config.email.apiKey);
+    logger.log(PREFIX, 'Resend email client initialized');
+    return resendClient;
   } catch (error) {
-    logger.error(PREFIX, 'Failed to initialize email transporter:', error);
+    logger.error(PREFIX, 'Failed to initialize Resend client:', error);
     return null;
   }
 }
@@ -134,15 +129,15 @@ function generateStatistics(callData) {
  */
 export async function sendCallSummary(callData) {
   try {
-    const transport = initializeTransporter();
+    const resend = initializeResend();
     
-    if (!transport) {
-      logger.error(PREFIX, 'Email transporter not initialized');
+    if (!resend) {
+      logger.error(PREFIX, 'Resend client not initialized');
       return false;
     }
 
-    if (!config.email.user || !config.email.password) {
-      logger.warn(PREFIX, 'Email credentials not configured');
+    if (!config.email.from || !config.email.to) {
+      logger.warn(PREFIX, 'Email from/to addresses not configured');
       return false;
     }
 
@@ -291,15 +286,20 @@ export async function sendCallSummary(callData) {
       </html>
     `;
 
-    // Send email
-    const info = await transport.sendMail({
-      from: `"Home Maintenance AI" <${config.email.from || config.email.user}>`,
+    // Send email via Resend
+    const { data, error } = await resend.emails.send({
+      from: config.email.from,
       to: config.email.to,
       subject: subject,
       html: htmlBody,
     });
 
-    logger.success(PREFIX, `Call summary email sent: ${info.messageId}`);
+    if (error) {
+      logger.error(PREFIX, 'Resend API error:', error);
+      return false;
+    }
+
+    logger.success(PREFIX, `Call summary email sent: ${data.id}`);
     logger.log(PREFIX, `Email sent to: ${config.email.to}`);
     
     return true;
@@ -317,10 +317,15 @@ export async function sendCallSummary(callData) {
  */
 export async function sendEmergencyAlert(emergencyData) {
   try {
-    const transport = initializeTransporter();
+    const resend = initializeResend();
     
-    if (!transport) {
-      logger.error(PREFIX, 'Email transporter not initialized');
+    if (!resend) {
+      logger.error(PREFIX, 'Resend client not initialized');
+      return false;
+    }
+
+    if (!config.email.from || !config.email.to) {
+      logger.warn(PREFIX, 'Email from/to addresses not configured');
       return false;
     }
 
@@ -373,15 +378,19 @@ export async function sendEmergencyAlert(emergencyData) {
       </html>
     `;
 
-    await transport.sendMail({
-      from: `"Home Maintenance AI - ${alertType}" <${config.email.from || config.email.user}>`,
+    const { data, error } = await resend.emails.send({
+      from: config.email.from,
       to: config.email.to,
       subject: `${alertIcon} ${alertType} ALERT - ${emergencyData.reason}`,
       html: htmlBody,
-      priority: 'high',
     });
 
-    logger.success(PREFIX, `${alertType} alert email sent`);
+    if (error) {
+      logger.error(PREFIX, 'Resend API error:', error);
+      return false;
+    }
+
+    logger.success(PREFIX, `${alertType} alert email sent: ${data.id}`);
     return true;
 
   } catch (error) {
@@ -396,13 +405,17 @@ export async function sendEmergencyAlert(emergencyData) {
  */
 export async function testEmailConfiguration() {
   try {
-    const transport = initializeTransporter();
+    const resend = initializeResend();
     
-    if (!transport) {
+    if (!resend) {
       return false;
     }
 
-    await transport.verify();
+    if (!config.email.from || !config.email.to) {
+      logger.error(PREFIX, 'Email from/to addresses not configured');
+      return false;
+    }
+
     logger.success(PREFIX, 'Email configuration verified successfully');
     return true;
 

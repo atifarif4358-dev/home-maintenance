@@ -28,8 +28,8 @@
     "express-ws": "^5.0.2",
     "mammoth": "^1.11.0",
     "multer": "^2.0.2",
-    "nodemailer": "^7.0.12",
     "pdf-parse": "^2.4.5",
+    "resend": "^4.0.1",
     "retell-sdk": "^3.0.0",
     "zod": "^3.22.4"
   }
