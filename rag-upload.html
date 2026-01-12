@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Document Upload | Home Maintenance</title>
+    <meta name="description" content="Upload and manage documents for RAG-powered search and analysis">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: hsl(260, 80%, 60%);
+            --primary-dark: hsl(260, 80%, 50%);
+            --primary-light: hsl(260, 80%, 70%);
+            --secondary: hsl(200, 90%, 60%);
+            --bg-dark: hsl(240, 15%, 8%);
+            --bg-card: hsl(240, 12%, 12%);
+            --bg-card-hover: hsl(240, 12%, 15%);
+            --text-primary: hsl(0, 0%, 95%);
+            --text-secondary: hsl(0, 0%, 65%);
+            --success: hsl(140, 70%, 55%);
+            --error: hsl(0, 70%, 60%);
+            --border: hsl(240, 10%, 20%);
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+            background-image:
+                radial-gradient(at 0% 0%, hsl(260, 80%, 20%) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, hsl(200, 90%, 20%) 0px, transparent 50%);
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            animation: fadeInDown 0.6s ease-out;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 968px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: var(--shadow);
+            animation: fadeInUp 0.6s ease-out;
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            background: var(--bg-card-hover);
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .card h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .icon {
+            width: 24px;
+            height: 24px;
+            display: inline-block;
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-area::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(138, 96, 255, 0.1), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .upload-area:hover {
+            border-color: var(--primary);
+            background: rgba(138, 96, 255, 0.05);
+        }
+
+        .upload-area:hover::before {
+            left: 100%;
+        }
+
+        .upload-area.dragover {
+            border-color: var(--primary);
+            background: rgba(138, 96, 255, 0.1);
+            transform: scale(1.02);
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.7;
+        }
+
+        .upload-text {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .upload-hint {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transform: translate(-50%, -50%);
+            transition: width 0.5s, height 0.5s;
+        }
+
+        .btn:hover::before {
+            width: 300px;
+            height: 300px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(138, 96, 255, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn span {
+            position: relative;
+            z-index: 1;
+        }
+
+        .progress-container {
+            margin-top: 1.5rem;
+            display: none;
+        }
+
+        .progress-container.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            width: 0%;
+            transition: width 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            animation: shimmer 1.5s infinite;
+        }
+
+        @keyframes shimmer {
+            0% {
+                transform: translateX(-100%);
+            }
+
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        .status-message {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 8px;
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .status-message.active {
+            display: block;
+        }
+
+        .status-message.success {
+            background: rgba(72, 187, 120, 0.1);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+
+        .status-message.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error);
+            color: var(--error);
+        }
+
+        .documents-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .documents-list::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .documents-list::-webkit-scrollbar-track {
+            background: var(--bg-dark);
+            border-radius: 4px;
+        }
+
+        .documents-list::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        .documents-list::-webkit-scrollbar-thumb:hover {
+            background: var(--primary);
+        }
+
+        .document-item {
+            background: var(--bg-dark);
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .document-item:hover {
+            border-color: var(--primary);
+            transform: translateX(4px);
+        }
+
+        .document-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 0.5rem;
+        }
+
+        .document-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            word-break: break-word;
+        }
+
+        .document-meta {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: rgba(138, 96, 255, 0.2);
+            color: var(--primary-light);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            opacity: 0.3;
+            margin-bottom: 1rem;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--bg-dark);
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-light);
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 RAG Document Upload</h1>
+            <p class="subtitle">Upload documents to power your AI-driven search and analysis</p>
+        </header>
+
+        <div class="grid">
+            <!-- Upload Section -->
+            <div class="card">
+                <h2>
+                    <span class="icon">📤</span>
+                    Upload Document
+                </h2>
+
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">Drag & drop your file here</div>
+                    <div class="upload-hint">or click to browse</div>
+                    <div class="upload-hint" style="margin-top: 1rem;">
+                        <small>Supported: PDF, DOC, DOCX, TXT (Max 10MB)</small>
+                    </div>
+                    <input type="file" id="fileInput" accept=".pdf,.doc,.docx,.txt">
+                </div>
+
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+
+                <div class="status-message" id="statusMessage"></div>
+
+                <button class="btn" id="uploadBtn" style="margin-top: 1.5rem; width: 100%; justify-content: center;"
+                    disabled>
+                    <span>Select a file to upload</span>
+                </button>
+            </div>
+
+            <!-- Documents List Section -->
+            <div class="card">
+                <h2>
+                    <span class="icon">📋</span>
+                    Uploaded Documents
+                    <button class="btn" onclick="loadDocuments()"
+                        style="margin-left: auto; padding: 0.5rem 1rem; font-size: 0.9rem;">
+                        <span>🔄 Refresh</span>
+                    </button>
+                </h2>
+
+                <div class="stats" id="statsContainer">
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalDocs">0</div>
+                        <div class="stat-label">Documents</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalChunks">0</div>
+                        <div class="stat-label">Chunks</div>
+                    </div>
+                </div>
+
+                <div class="documents-list" id="documentsList">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <div>No documents uploaded yet</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Automatically detect environment
+        const API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+            ? 'http://localhost:3000'  // Local development
+            : `${window.location.protocol}//${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}`; // Production
+        let selectedFile = null;
+
+        // Elements
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const statusMessage = document.getElementById('statusMessage');
+        const documentsList = document.getElementById('documentsList');
+
+        // Upload area click handler
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // File selection
+        fileInput.addEventListener('change', (e) => {
+            handleFileSelect(e.target.files[0]);
+        });
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFileSelect(e.dataTransfer.files[0]);
+        });
+
+        // Handle file selection
+        function handleFileSelect(file) {
+            if (!file) return;
+
+            const allowedTypes = ['application/pdf', 'application/msword',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'text/plain'];
+            const allowedExtensions = ['.pdf', '.doc', '.docx', '.txt'];
+            const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+
+            if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExt)) {
+                showStatus('Only PDF, DOC, DOCX, and TXT files are allowed', 'error');
+                return;
+            }
+
+            if (file.size > 10 * 1024 * 1024) {
+                showStatus('File size must be less than 10MB', 'error');
+                return;
+            }
+
+            selectedFile = file;
+            uploadBtn.disabled = false;
+            uploadBtn.innerHTML = `<span>📤 Upload "${file.name}"</span>`;
+            hideStatus();
+        }
+
+        // Upload button click
+        uploadBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            uploadBtn.disabled = true;
+            progressContainer.classList.add('active');
+            hideStatus();
+
+            const formData = new FormData();
+            formData.append('document', selectedFile);
+
+            try {
+                // Simulate progress
+                let progress = 0;
+                const progressInterval = setInterval(() => {
+                    progress += 10;
+                    if (progress <= 90) {
+                        progressFill.style.width = progress + '%';
+                    }
+                }, 200);
+
+                const response = await fetch(`${API_BASE_URL}/rag/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                clearInterval(progressInterval);
+                progressFill.style.width = '100%';
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showStatus(`✓ Successfully uploaded "${result.document.fileName}"!`, 'success');
+                    resetUpload();
+                    loadDocuments();
+                } else {
+                    throw new Error(result.error || 'Upload failed');
+                }
+
+            } catch (error) {
+                console.error('Upload error:', error);
+                showStatus(`✗ Upload failed: ${error.message}`, 'error');
+                uploadBtn.disabled = false;
+            } finally {
+                setTimeout(() => {
+                    progressContainer.classList.remove('active');
+                    progressFill.style.width = '0%';
+                }, 1000);
+            }
+        });
+
+        // Show status message
+        function showStatus(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.className = `status-message active ${type}`;
+        }
+
+        // Hide status message
+        function hideStatus() {
+            statusMessage.classList.remove('active');
+        }
+
+        // Reset upload form
+        function resetUpload() {
+            selectedFile = null;
+            fileInput.value = '';
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<span>Select a file to upload</span>';
+        }
+
+        // Load documents list
+        async function loadDocuments() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/rag/documents`);
+                const result = await response.json();
+
+                if (result.success && result.documents) {
+                    displayDocuments(result.documents);
+                    updateStats(result.documents);
+                } else {
+                    throw new Error('Failed to load documents');
+                }
+            } catch (error) {
+                console.error('Load error:', error);
+                documentsList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">❌</div>
+                        <div>Failed to load documents</div>
+                        <div style="margin-top: 0.5rem; font-size: 0.9rem;">${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        // Display documents
+        function displayDocuments(documents) {
+            if (!documents || documents.length === 0) {
+                documentsList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <div>No documents uploaded yet</div>
+                    </div>
+                `;
+                return;
+            }
+
+            documentsList.innerHTML = documents.map(doc => `
+                <div class="document-item">
+                    <div class="document-header">
+                        <div class="document-name">${escapeHtml(doc.file_name)}</div>
+                        <span class="badge">${doc.chunk_count} chunks</span>
+                    </div>
+                    <div class="document-meta">
+                        <span>📄 ${formatFileSize(doc.file_size)}</span>
+                        <span>📅 ${formatDate(doc.created_at)}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Update statistics
+        function updateStats(documents) {
+            const totalDocs = documents.length;
+            const totalChunks = documents.reduce((sum, doc) => sum + (doc.chunk_count || 0), 0);
+
+            document.getElementById('totalDocs').textContent = totalDocs;
+            document.getElementById('totalChunks').textContent = totalChunks;
+        }
+
+        // Utility functions
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Load documents on page load
+        loadDocuments();
+    </script>
+</body>
+
+</html>
