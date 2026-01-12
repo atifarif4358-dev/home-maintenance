@@ -368,6 +368,24 @@
             color: var(--primary-light);
         }
 
+        .storage-link {
+            color: var(--primary-light);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            font-weight: 500;
+        }
+
+        .storage-link:hover {
+            background: rgba(138, 96, 255, 0.15);
+            color: var(--primary);
+            transform: translateX(2px);
+        }
+
         .empty-state {
             text-align: center;
             padding: 3rem 1rem;
@@ -721,6 +739,7 @@
                     <div class="document-meta">
                         <span>📄 ${formatFileSize(doc.file_size)}</span>
                         <span>📅 ${formatDate(doc.created_at)}</span>
+                        ${doc.storage_url ? `<a href="${escapeHtml(doc.storage_url)}" target="_blank" rel="noopener noreferrer" class="storage-link">🔗 Open File</a>` : '<span style="color: var(--text-secondary); font-size: 0.85rem;">No storage URL</span>'}
                     </div>
                 </div>
             `).join('');

@@ -10,7 +10,7 @@ import fs from 'fs/promises';
 import { processFile, splitTextIntoChunks } from '../services/file-processor.service.js';
 import { createEmbeddings } from '../services/embedding.service.js';
 import { upsertDocumentEmbeddings } from '../services/pinecone.service.js';
-import { saveRAGDocument, listRAGDocuments } from '../services/database.service.js';
+import { saveRAGDocument, listRAGDocuments, uploadFileToStorage } from '../services/database.service.js';
 import { logger } from '../utils/logger.js';
 
 const router = express.Router();
@@ -94,27 +94,34 @@ router.post('/upload', upload.single('document'), async (req, res) => {
     logger.log(PREFIX, 'Step 2: Splitting text into chunks...');
     const chunks = splitTextIntoChunks(textContent, 1000, 200);
 
-    // Step 3: Create embeddings
-    logger.log(PREFIX, 'Step 3: Creating embeddings...');
+    // Step 3: Upload file to Supabase storage
+    logger.log(PREFIX, 'Step 3: Uploading file to Supabase storage...');
+    const storageUrl = await uploadFileToStorage(filePath, fileName, 'rag_docs');
+    
+    if (!storageUrl) {
+      throw new Error('Failed to upload file to storage');
+    }
+
+    // Step 4: Create embeddings
+    logger.log(PREFIX, 'Step 4: Creating embeddings...');
     const embeddings = await createEmbeddings(chunks);
 
-    // Step 4: Save to Supabase
-    logger.log(PREFIX, 'Step 4: Saving document to database...');
+    // Step 5: Save to Supabase database
+    logger.log(PREFIX, 'Step 5: Saving document to database...');
     const savedDocument = await saveRAGDocument({
       fileName,
       fileType,
       fileSize,
-      textContent,
       chunkCount: chunks.length,
-      storageUrl: null, // Could upload to Supabase storage here
+      storageUrl,
     });
 
     if (!savedDocument) {
       throw new Error('Failed to save document to database');
     }
 
-    // Step 5: Upsert to Pinecone
-    logger.log(PREFIX, 'Step 5: Upserting embeddings to Pinecone...');
+    // Step 6: Upsert to Pinecone
+    logger.log(PREFIX, 'Step 6: Upserting embeddings to Pinecone...');
     await upsertDocumentEmbeddings(
       savedDocument.id,
       chunks,
@@ -141,6 +148,7 @@ router.post('/upload', upload.single('document'), async (req, res) => {
         fileType: savedDocument.file_type,
         fileSize: savedDocument.file_size,
         chunkCount: savedDocument.chunk_count,
+        storageUrl: savedDocument.storage_url,
         createdAt: savedDocument.created_at,
       }
     });

@@ -4,11 +4,9 @@
  */
 
 import fs from 'fs/promises';
-// import pdfParse from 'pdf-parse';
-// import pdfParse from 'pdf-parse';
-import * as pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import { logger } from '../utils/logger.js';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const PREFIX = 'FileProcessor';
 
@@ -19,12 +17,37 @@ const PREFIX = 'FileProcessor';
  */
 async function extractTextFromPDF(filePath) {
   try {
-    const dataBuffer = await fs.readFile(filePath);
-    // const data = await pdfParse(dataBuffer);
-    // const data = await pdfParse(dataBuffer);
-    const data = await pdfParse.default(dataBuffer);
-    logger.success(PREFIX, `Extracted ${data.text.length} characters from PDF`);
-    return data.text;
+    const buffer = await fs.readFile(filePath);
+
+    // FIX: Buffer → Uint8Array
+    const uint8Array = new Uint8Array(buffer);
+
+    const loadingTask = pdfjsLib.getDocument({ data: uint8Array });
+    const pdf = await loadingTask.promise;
+
+    let fullText = '';
+
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const content = await page.getTextContent();
+
+      const pageText = content.items
+        .map(item => item.str)
+        .join(' ');
+
+      fullText += pageText + '\n';
+    }
+
+    if (!fullText.trim()) {
+      throw new Error('PDF contains no extractable text (possibly scanned)');
+    }
+
+    logger.success(
+      PREFIX,
+      `Extracted ${fullText.length} characters from PDF (${pdf.numPages} pages)`
+    );
+
+    return fullText;
   } catch (error) {
     logger.error(PREFIX, 'Error extracting PDF text:', error);
     throw new Error('Failed to extract text from PDF');

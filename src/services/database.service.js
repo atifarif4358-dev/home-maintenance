@@ -239,6 +239,59 @@ export async function getTranscriptWithMetadata(phoneNumber) {
 }
 
 /**
+ * Upload file to Supabase storage bucket
+ * @param {string} filePath - Local file path
+ * @param {string} fileName - Original file name
+ * @param {string} bucketName - Bucket name (default: 'rag_docs')
+ * @returns {Promise<string|null>} - Public URL of uploaded file or null
+ */
+export async function uploadFileToStorage(filePath, fileName, bucketName = 'rag_docs') {
+  try {
+    logger.log(PREFIX, `Uploading file to storage: ${fileName}`);
+    
+    // Read file buffer
+    const fs = await import('fs/promises');
+    const fileBuffer = await fs.readFile(filePath);
+    
+    // Generate unique file path in storage
+    const timestamp = Date.now();
+    const randomSuffix = Math.round(Math.random() * 1E9);
+    const fileExtension = fileName.split('.').pop();
+    const storagePath = `${timestamp}-${randomSuffix}.${fileExtension}`;
+    
+    // Upload to Supabase storage
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .upload(storagePath, fileBuffer, {
+        contentType: 'application/octet-stream',
+        upsert: false
+      });
+    
+    if (error) {
+      logger.error(PREFIX, 'Error uploading to storage:', error);
+      return null;
+    }
+    
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from(bucketName)
+      .getPublicUrl(storagePath);
+    
+    if (!urlData?.publicUrl) {
+      logger.error(PREFIX, 'Failed to get public URL');
+      return null;
+    }
+    
+    logger.success(PREFIX, `File uploaded to storage: ${urlData.publicUrl}`);
+    return urlData.publicUrl;
+    
+  } catch (error) {
+    logger.error(PREFIX, 'Unexpected error uploading file:', error);
+    return null;
+  }
+}
+
+/**
  * Save RAG document to database
  * @param {Object} documentData - Document data
  * @returns {Promise<Object|null>} - Saved document or null
@@ -253,7 +306,6 @@ export async function saveRAGDocument(documentData) {
         file_name: documentData.fileName,
         file_type: documentData.fileType,
         file_size: documentData.fileSize,
-        text_content: documentData.textContent,
         chunk_count: documentData.chunkCount,
         storage_url: documentData.storageUrl,
       }])
@@ -308,7 +360,7 @@ export async function listRAGDocuments() {
   try {
     const { data, error } = await supabase
       .from('rag_documents')
-      .select('id, file_name, file_type, file_size, chunk_count, created_at')
+      .select('id, file_name, file_type, file_size, chunk_count, storage_url, created_at')
       .order('created_at', { ascending: false });
     
     if (error) {
