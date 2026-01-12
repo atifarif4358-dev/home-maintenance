@@ -532,9 +532,17 @@
 
     <script>
         // Automatically detect environment
-        const API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-            ? 'http://localhost:3000'  // Local development
+        // When opened as file://, use localhost. Otherwise use the current domain.
+        const API_BASE_URL = (window.location.protocol === 'file:' ||
+            window.location.hostname === 'localhost' ||
+            window.location.hostname === '127.0.0.1' ||
+            window.location.hostname === '')
+            ? 'http://localhost:3000'  // Local development or opened as file://
             : `${window.location.protocol}//${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}`; // Production
+
+        console.log('🌐 Detected API URL:', API_BASE_URL);
+        console.log('📍 Current location:', window.location.href);
+
         let selectedFile = null;
 
         // Elements
