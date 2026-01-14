@@ -403,3 +403,114 @@ export async function testConnection() {
   }
 }
 
+// ============================================================
+// CALL HISTORY FUNCTIONS (for callback continuity)
+// ============================================================
+
+/**
+ * Save call history to database (called via webhook when call ends)
+ * @param {Object} callData - Call data from Retell webhook
+ * @returns {Promise<boolean>} - Success status
+ */
+export async function saveCallHistory(callData) {
+  try {
+    logger.log(PREFIX, `Saving call history for call: ${callData.call_id}`);
+    
+    // Format transcript if it's an array
+    let transcriptText = '';
+    if (Array.isArray(callData.transcript)) {
+      transcriptText = callData.transcript
+        .map(turn => `${turn.role}: ${turn.content}`)
+        .join('\n');
+    } else if (typeof callData.transcript === 'string') {
+      transcriptText = callData.transcript;
+    }
+    
+    const { data, error } = await supabase
+      .from('call_history')
+      .insert([{
+        call_id: callData.call_id,
+        from_number: callData.from_number,
+        to_number: callData.to_number || null,
+        transcript: transcriptText,
+        call_duration_ms: callData.call_duration_ms || null,
+        call_status: callData.call_status || 'ended',
+        recording_url: callData.recording_url || null,
+        call_summary: callData.call_summary || null,
+        ended_at: new Date().toISOString()
+      }])
+      .select();
+    
+    if (error) {
+      logger.error(PREFIX, 'Error saving call history:', error);
+      return false;
+    }
+    
+    logger.success(PREFIX, `Call history saved for ${callData.from_number} (Call ID: ${callData.call_id})`);
+    return true;
+    
+  } catch (error) {
+    logger.error(PREFIX, 'Unexpected error saving call history:', error);
+    return false;
+  }
+}
+
+/**
+ * Get the last call for a phone number (for callback scenarios)
+ * @param {string} phoneNumber - Caller's phone number
+ * @param {string} currentCallId - Current call ID to exclude
+ * @param {number} maxAgeMinutes - Maximum age in minutes (default: 120 = 2 hours)
+ * @returns {Promise<Object|null>} - Previous call data or null
+ */
+export async function getLastCallByPhone(phoneNumber, currentCallId = null, maxAgeMinutes = 120) {
+  try {
+    logger.log(PREFIX, `Looking up previous calls for: ${phoneNumber}`);
+    
+    // Calculate cutoff time
+    const cutoffTime = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
+    
+    let query = supabase
+      .from('call_history')
+      .select('call_id, from_number, transcript, call_duration_ms, call_summary, ended_at')
+      .eq('from_number', phoneNumber)
+      .gte('ended_at', cutoffTime)
+      .order('ended_at', { ascending: false })
+      .limit(1);
+    
+    // Exclude current call if provided
+    if (currentCallId) {
+      query = query.neq('call_id', currentCallId);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      logger.error(PREFIX, 'Error fetching previous call:', error);
+      return null;
+    }
+    
+    if (!data || data.length === 0) {
+      logger.log(PREFIX, `No recent calls found for ${phoneNumber}`);
+      return null;
+    }
+    
+    const lastCall = data[0];
+    const endTime = new Date(lastCall.ended_at);
+    const minutesAgo = Math.round((Date.now() - endTime.getTime()) / 60000);
+    
+    logger.success(PREFIX, `✓ Found previous call from ${minutesAgo} minutes ago`);
+    
+    return {
+      callId: lastCall.call_id,
+      endTime: endTime,
+      transcript: lastCall.transcript,
+      duration: lastCall.call_duration_ms ? Math.round(lastCall.call_duration_ms / 1000) : null,
+      summary: lastCall.call_summary
+    };
+    
+  } catch (error) {
+    logger.error(PREFIX, 'Unexpected error fetching previous call:', error);
+    return null;
+  }
+}
+

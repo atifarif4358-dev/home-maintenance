@@ -249,6 +249,15 @@ export async function sendCallSummary(callData) {
             </div>
           </div>
           
+          ${callData.aiSummary ? `
+          <div class="section">
+            <h2>🤖 AI-Generated Summary</h2>
+            <div style="background: #e3f2fd; padding: 20px; border-radius: 8px; border-left: 4px solid #2196f3; line-height: 1.8;">
+              <p style="margin: 0; color: #1565c0;">${callData.aiSummary}</p>
+            </div>
+          </div>
+          ` : ''}
+          
           ${callData.recordingUrl ? `
           <div class="section">
             <h2>📞 Call Recording</h2>
@@ -306,6 +315,156 @@ export async function sendCallSummary(callData) {
 
   } catch (error) {
     logger.error(PREFIX, 'Failed to send call summary email:', error);
+    return false;
+  }
+}
+
+/**
+ * Send call summary email from webhook data (with AI summary and recording)
+ * @param {Object} callData - Call data from webhook
+ * @returns {Promise<boolean>} - Success status
+ */
+export async function sendCallSummaryFromWebhook(callData) {
+  try {
+    const resend = initializeResend();
+    
+    if (!resend) {
+      logger.error(PREFIX, 'Resend client not initialized');
+      return false;
+    }
+
+    if (!config.email.from || !config.email.to) {
+      logger.warn(PREFIX, 'Email from/to addresses not configured');
+      return false;
+    }
+
+    logger.log(PREFIX, `Preparing webhook call summary email for call: ${callData.callId}`);
+
+    // Format transcript for display
+    let formattedTranscript = '';
+    if (Array.isArray(callData.transcript)) {
+      formattedTranscript = callData.transcript
+        .map(turn => `<strong>${turn.role === 'agent' ? '🤖 Agent' : '👤 User'}:</strong> ${turn.content}`)
+        .join('<br><br>');
+    } else if (typeof callData.transcript === 'string') {
+      formattedTranscript = callData.transcript.replace(/\n/g, '<br>');
+    }
+
+    // Determine sentiment emoji
+    const sentimentEmoji = {
+      'Positive': '😊',
+      'Negative': '😞',
+      'Neutral': '😐',
+    }[callData.userSentiment] || '❓';
+
+
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; }
+          .header h1 { margin: 0; font-size: 28px; }
+          .header p { margin: 10px 0 0 0; opacity: 0.9; }
+          .stats { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 30px; }
+          .stat-card { background: #f8f9fa; padding: 15px; border-radius: 8px; flex: 1; min-width: 150px; border-left: 4px solid #667eea; }
+          .stat-card .label { font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
+          .stat-card .value { font-size: 24px; font-weight: bold; color: #333; }
+          .section { margin-bottom: 30px; }
+          .section h2 { color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
+          .ai-summary { background: #e3f2fd; padding: 20px; border-radius: 8px; border-left: 4px solid #2196f3; }
+          .recording-btn { display: inline-block; background: #4caf50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; }
+          .footer { text-align: center; color: #999; font-size: 12px; margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>📞 Call Summary Report</h1>
+            <p>Call ID: ${callData.callId}</p>
+            <p>Timestamp: ${new Date().toLocaleString()}</p>
+          </div>
+
+          <div class="stats">
+            <div class="stat-card">
+              <div class="label">Phone Number</div>
+              <div class="value" style="font-size: 16px;">${callData.phoneNumber || 'Unknown'}</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Duration</div>
+              <div class="value">${callData.duration || 'N/A'}</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">User Sentiment</div>
+              <div class="value">${sentimentEmoji} ${callData.userSentiment || 'Unknown'}</div>
+            </div>
+          </div>
+
+          ${callData.aiSummary ? `
+          <div class="section">
+            <h2>🤖 AI-Generated Summary</h2>
+            <div class="ai-summary">
+              <p style="margin: 0; font-size: 16px; line-height: 1.8;">${callData.aiSummary}</p>
+            </div>
+          </div>
+          ` : ''}
+
+          ${callData.recordingUrl ? `
+          <div class="section">
+            <h2>🎧 Call Recording</h2>
+            <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0 0 15px 0; color: #2e7d32;">
+                <strong>Full call audio is available for review:</strong>
+              </p>
+              <a href="${callData.recordingUrl}" class="recording-btn">
+                ▶ Listen to Full Call Recording
+              </a>
+              <p style="margin: 15px 0 0 0; color: #666; font-size: 12px;">
+                Click to play or download the complete call audio
+              </p>
+            </div>
+          </div>
+          ` : ''}
+
+          ${formattedTranscript ? `
+          <div class="section">
+            <h2>📝 Full Transcript</h2>
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; max-height: 400px; overflow-y: auto; border-left: 4px solid #667eea;">
+              ${formattedTranscript}
+            </div>
+          </div>
+          ` : ''}
+
+          <div class="footer">
+            <p>This is an automated call summary from Home Maintenance Voice Agent System</p>
+            <p>Generated at ${new Date().toISOString()}</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Send email via Resend
+    const { data, error } = await resend.emails.send({
+      from: config.email.from,
+      to: config.email.to,
+      subject: `📞 Call Summary - ${callData.phoneNumber || callData.callId}`,
+      html: htmlBody,
+    });
+
+    if (error) {
+      logger.error(PREFIX, 'Resend API error:', error);
+      return false;
+    }
+
+    logger.success(PREFIX, `Webhook call summary email sent: ${data.id}`);
+    return true;
+
+  } catch (error) {
+    logger.error(PREFIX, 'Failed to send webhook call summary email:', error);
     return false;
   }
 }

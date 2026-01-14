@@ -167,9 +167,36 @@ export async function createAgent(systemPrompt, transcriptId = null, enableRAG =
  * Generate system prompt for technical support agent with video
  * @param {string} transcript - Video transcript
  * @param {boolean} hasFrames - Whether video frames are available
+ * @param {Object|null} previousCallContext - Previous call transcript for callback scenarios
  * @returns {string} - System prompt
  */
-export function createTechnicalSupportPrompt(transcript, hasFrames = true) {
+export function createTechnicalSupportPrompt(transcript, hasFrames = true, previousCallContext = null) {
+  // Build previous call context section if available
+  const previousCallSection = previousCallContext ? `
+
+═══════════════════════════════════════════════════════
+IMPORTANT - THIS IS A CALLBACK (Continuing Previous Conversation)
+═══════════════════════════════════════════════════════
+
+This caller spoke with us ${Math.round((Date.now() - previousCallContext.endTime) / 60000)} minutes ago.
+They were instructed to call back after completing a step.
+
+PREVIOUS CONVERSATION TRANSCRIPT:
+${previousCallContext.transcript}
+
+YOUR TASK:
+1. Greet them warmly and acknowledge they are calling back
+2. Ask if they completed the step you asked them to do
+3. If yes, continue with the NEXT step in the troubleshooting process
+4. If they had issues, help them troubleshoot that specific step
+
+EXAMPLE GREETING FOR CALLBACK:
+"Welcome back! I see you were working on [issue] earlier. Did you complete the [step we asked]? How did it go?"
+
+DO NOT start from the beginning - continue from where you left off!
+═══════════════════════════════════════════════════════
+` : '';
+
   const videoToolsInstructions = hasFrames ? `
 
 VIDEO ANALYSIS TOOLS (INTERNAL - Don't mention these technical details to the user):
@@ -287,7 +314,7 @@ DEFAULT APPROACH:
 Only escalate if the user later says it's worse than expected ("actually it's flooding now")`;
 
   return `You are a technical support agent for home maintenance. The user has uploaded a video before this call. 
-
+${previousCallSection}
 INTERNAL NOTE - VIDEO INFORMATION (extracted from their video):
 "${transcript}"
 ${videoToolsInstructions}
@@ -321,6 +348,34 @@ Agent: "Here are the steps: First turn off the valve, then place a bucket, then 
 ❌ This is TOO MUCH at once - the user can't remember all steps!
 
 Give ONE step at a time, wait for confirmation, then proceed.
+
+CRITICAL - TIME-CONSUMING STEPS (CALLBACK INSTEAD OF WAITING):
+Some troubleshooting steps take significant time. DO NOT stay on the line waiting. Instead, tell the caller to call back when done.
+
+TIME-CONSUMING STEPS THAT REQUIRE CALLBACK:
+- Waiting for water heater to heat up: approximately 30 to 60 minutes
+- Waiting for thermostat temperature changes to take effect: approximately 5 to 15 minutes
+- Waiting for circuit breaker reset and system restart: approximately 2 to 5 minutes
+- Waiting for garbage disposal reset: approximately 1 to 2 minutes
+- Waiting for pipes to drain completely: approximately 5 to 10 minutes
+- Waiting for HVAC system to cycle: approximately 5 to 10 minutes
+- Waiting for flushing or draining tanks: approximately 15 to 30 minutes
+- Any step where the user says "this will take a while" or "I need more time"
+
+WHAT TO SAY FOR TIME-CONSUMING STEPS:
+When you reach a step that takes more than 2 minutes, say something like:
+"This step will take about [estimated time]. To save you time on this call, I recommend you complete this step and then call us back when it is done. We will pick up right where we left off. Does that work for you?"
+
+OR if there is a specific wait time:
+"The [appliance] will need about [time] to [action]. Please call us back once that is complete, and we will continue with the next step."
+
+EXAMPLES:
+- "The water heater will need about 30 minutes to heat back up. Please give us a call back once it is ready, and I will help you with the next step."
+- "After resetting the thermostat, it usually takes about 10 minutes for the system to respond. Call us back after that, and we will check if it is working."
+- "Let the system run for about 5 minutes. Once you have done that, call us back and we will continue troubleshooting."
+
+DO NOT say "I will wait on the line" or "Take your time, I will be here" for steps longer than 2 minutes.
+This wastes the customer's phone bill and our resources. Always suggest a callback for longer steps.
 
 CRITICAL - VIDEO LANGUAGE:
 - ✅ Say: "in your video", "what you showed me", "in the video you uploaded", "at the 15-second mark in your video"
@@ -360,9 +415,36 @@ Keep responses concise. Give ONE step at a time and wait for confirmation.`;
 
 /**
  * Generate system prompt for receptionist agent
+ * @param {Object|null} previousCallContext - Previous call transcript for callback scenarios
  * @returns {string} - System prompt
  */
-export function createReceptionistPrompt() {
+export function createReceptionistPrompt(previousCallContext = null) {
+  // Build previous call context section if available
+  const previousCallSection = previousCallContext ? `
+
+═══════════════════════════════════════════════════════
+IMPORTANT - THIS IS A CALLBACK (Continuing Previous Conversation)
+═══════════════════════════════════════════════════════
+
+This caller spoke with us ${Math.round((Date.now() - previousCallContext.endTime) / 60000)} minutes ago.
+They were instructed to call back after completing a step.
+
+PREVIOUS CONVERSATION TRANSCRIPT:
+${previousCallContext.transcript}
+
+YOUR TASK:
+1. Greet them warmly and acknowledge they are calling back
+2. Ask if they completed the step you asked them to do
+3. If yes, continue with the NEXT step in the troubleshooting process
+4. If they had issues, help them troubleshoot that specific step
+
+EXAMPLE GREETING FOR CALLBACK:
+"Welcome back! I see you were working on [issue] earlier. Did you complete the [step we asked]? How did it go?"
+
+DO NOT start from the beginning - continue from where you left off!
+═══════════════════════════════════════════════════════
+` : '';
+
   const ragToolInstructions = `
 
 KNOWLEDGE BASE TOOL AVAILABLE:
@@ -442,6 +524,7 @@ DEFAULT APPROACH:
 Only escalate if the user says it's worse than expected`;
 
   return `You are a friendly home maintenance receptionist. The user has called for help but hasn't uploaded any video or information beforehand.
+${previousCallSection}
 ${ragToolInstructions}
 ${emergencyInstructions}
 
@@ -468,15 +551,37 @@ This is a PHONE CALL, not text chat. NEVER use ANY symbols:
 
 Speak exactly as if you're talking face-to-face. Use words only, no symbols.
 
+CRITICAL - TIME-CONSUMING STEPS (CALLBACK INSTEAD OF WAITING):
+Some troubleshooting steps take significant time. DO NOT stay on the line waiting. Instead, tell the caller to call back when done.
+
+TIME-CONSUMING STEPS THAT REQUIRE CALLBACK:
+- Waiting for water heater to heat up: approximately 30 to 60 minutes
+- Waiting for thermostat temperature changes: approximately 5 to 15 minutes
+- Waiting for circuit breaker reset: approximately 2 to 5 minutes
+- Waiting for HVAC system to cycle: approximately 5 to 10 minutes
+- Any step where the user says "this will take a while"
+
+WHAT TO SAY:
+"This step will take about [estimated time]. To save you time on this call, please complete this step and call us back when it is done. We will continue from where we left off."
+
+DO NOT say "I will wait on the line" for steps longer than 2 minutes. Always suggest a callback.
+
 Keep responses conversational and helpful. Make them feel supported. Give ONE step at a time.`;
 }
 
 /**
- * Generate first message based on transcript availability
+ * Generate first message based on transcript availability and callback status
  * @param {string|null} transcript - Video transcript if available
+ * @param {Object|null} previousCallContext - Previous call context for callbacks
  * @returns {string} - First message to user
  */
-export function generateFirstMessage(transcript) {
+export function generateFirstMessage(transcript, previousCallContext = null) {
+  // If this is a callback, greet them accordingly
+  if (previousCallContext) {
+    const minutesAgo = Math.round((Date.now() - previousCallContext.endTime) / 60000);
+    return `Welcome back! I see you called us about ${minutesAgo} minutes ago. Did you complete the step we discussed? How did it go?`;
+  }
+  
   if (transcript) {
     // Generic greeting that works for any issue
     return `Hello! I've reviewed the video you uploaded. I can help you with what you've shown me. Are you ready to get started?`;

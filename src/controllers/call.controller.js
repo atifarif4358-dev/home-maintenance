@@ -4,8 +4,8 @@
  */
 
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
-import { getTranscriptWithMetadata, fetchFramesByTranscriptId } from '../services/database.service.js';
 import { sendResponse, sendErrorResponse, sendDirectTransfer, getCallDetails } from '../services/retell.service.js';
+import { getTranscriptWithMetadata, fetchFramesByTranscriptId, getLastCallByPhone } from '../services/database.service.js';
 import { 
   createAgent, 
   createTechnicalSupportPrompt, 
@@ -37,6 +37,7 @@ export function handleWebSocketConnection(ws, callId) {
   let transferInProgress = false; // Prevent multiple transfers
   let agentInitializing = false; // Prevent duplicate initialization
   let greetingSent = false; // Track if we've sent the first greeting
+  let previousCallContext = null; // Previous call transcript for callbacks
 
   /**
    * Fetch call details from Retell API and initialize agent
@@ -94,8 +95,8 @@ export function handleWebSocketConnection(ws, callId) {
       return;
     }
     
-    // Generate first message based on whether we have transcript or not
-    const firstMessage = generateFirstMessage(transcriptData?.transcript || null);
+    // Generate first message based on whether we have transcript or not, and if this is a callback
+    const firstMessage = generateFirstMessage(transcriptData?.transcript || null, previousCallContext);
     
     // Send the greeting with response_id: 0 (no prior user message)
     sendResponse(ws, firstMessage, 0);
@@ -117,10 +118,18 @@ export function handleWebSocketConnection(ws, callId) {
       return;
     }
 
+    // Check for previous call transcript (callback scenario) - queries Supabase (fast!)
+    if (phoneNumber) {
+      previousCallContext = await getLastCallByPhone(phoneNumber, callId);
+      if (previousCallContext) {
+        logger.success(PREFIX, `✓ CALLBACK DETECTED - Previous call found from ${Math.round((Date.now() - previousCallContext.endTime) / 60000)} minutes ago`);
+      }
+    }
+
     if (!phoneNumber) {
       // No phone number - configure as receptionist
       logger.info(PREFIX, 'Initializing as RECEPTIONIST (no phone number available)');
-      const systemPrompt = createReceptionistPrompt();
+      const systemPrompt = createReceptionistPrompt(previousCallContext);
       agent = await createAgent(systemPrompt, null, true); // Enable RAG even without video
       agentInitialized = true;
       return;
@@ -150,8 +159,8 @@ export function handleWebSocketConnection(ws, callId) {
       conversationState.transcriptId = transcriptData.transcriptId;
       conversationState.hasVideo = hasFrames;
       
-      // Create system prompt with video tool instructions
-      const systemPrompt = createTechnicalSupportPrompt(transcriptData.transcript, hasFrames);
+      // Create system prompt with video tool instructions AND previous call context
+      const systemPrompt = createTechnicalSupportPrompt(transcriptData.transcript, hasFrames, previousCallContext);
       
       // Create agent with tools (video tools + RAG search + emergency)
       agent = await createAgent(systemPrompt, hasFrames ? transcriptData.transcriptId : null, true, true);
@@ -159,7 +168,7 @@ export function handleWebSocketConnection(ws, callId) {
     } else {
       // SCENARIO B: No Transcript - Receptionist Agent
       logger.info(PREFIX, 'ℹ RECEPTIONIST mode (no transcript for this number)');
-      const systemPrompt = createReceptionistPrompt();
+      const systemPrompt = createReceptionistPrompt(previousCallContext);
       agent = await createAgent(systemPrompt, null, true, true); // Enable RAG + emergency
     }
     
@@ -411,27 +420,10 @@ export function handleWebSocketConnection(ws, callId) {
     const callDuration = Math.floor((Date.now() - callStartTime) / 1000);
     const durationStr = `${Math.floor(callDuration / 60)}m ${callDuration % 60}s`;
     
-    // Send call summary email
-    try {
-      const { sendCallSummary } = await import('../services/email.service.js');
-      
-      await sendCallSummary({
-        callId,
-        phoneNumber: userPhoneNumber,
-        messages: conversationState.messages,
-        transcriptId: conversationState.transcriptId,
-        hasVideo: conversationState.hasVideo,
-        duration: durationStr,
-        emergencyDetected,
-        emergencyReason,
-        recordingUrl: recordingUrl,
-        notes: emergencyDetected ? 'Emergency situation was handled during this call.' : null,
-      });
-      
-      logger.success(PREFIX, 'Call summary email sent');
-    } catch (error) {
-      logger.error(PREFIX, 'Failed to send call summary email:', error);
-    }
+    // Note: Call summary email is now sent via webhook (call_analyzed event)
+    // This provides AI summary and recording URL from Retell
+    logger.log(PREFIX, `Call duration: ${durationStr}`);
+    logger.log(PREFIX, `Email will be sent via webhook when Retell sends call_analyzed event`);
   });
 
   ws.on('error', (error) => {
