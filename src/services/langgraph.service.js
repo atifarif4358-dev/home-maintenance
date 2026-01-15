@@ -20,8 +20,8 @@ const llm = new ChatOpenAI({
   temperature: config.openai.temperature || 0.7, // Lower temperature for more consistent formatting
   openAIApiKey: config.openai.apiKey,
   maxTokens: 4096,
-  // Stop sequences to prevent common formatting issues
-  stop: ['**', '- ', '* ']
+  // Note: Removed stop sequences ['**', '- ', '* '] as they were cutting off responses
+  // The system prompt already instructs the agent not to use text formatting
 });
 
 // Extended state annotation for frames
