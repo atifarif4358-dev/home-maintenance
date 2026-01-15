@@ -579,7 +579,7 @@ export function generateFirstMessage(transcript, previousCallContext = null) {
   // If this is a callback, greet them accordingly
   if (previousCallContext) {
     const minutesAgo = Math.round((Date.now() - previousCallContext.endTime) / 60000);
-    return `Welcome back! I see you called us about ${minutesAgo} minutes ago. Were you able to run through the troubleshooting? How did it turn out?`;
+    return `Welcome back! I see you called us previously. Were you able to run through the troubleshooting? How did it turn out?`;
   }
   
   if (transcript) {
