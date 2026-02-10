@@ -239,6 +239,71 @@ export async function getTranscriptWithMetadata(phoneNumber) {
 }
 
 /**
+ * Get all transcripts from the latest upload for a phone number.
+ * Finds the most recent uploadNumber, then returns all transcripts with that uploadNumber.
+ * @param {string} phoneNumber - The user's phone number
+ * @returns {Promise<Array|null>} - Array of transcript objects (ordered by created_at ASC) or null
+ */
+export async function getTranscriptsByLatestUpload(phoneNumber) {
+  try {
+    logger.log(PREFIX, `Looking up latest upload transcripts for phone: ${phoneNumber}`);
+    
+    // Step 1: Find the latest uploadNumber for this phone number
+    const { data: latestRow, error: latestError } = await supabase
+      .from('transcript')
+      .select('"uploadNumber"')
+      .eq('phoneNumber', phoneNumber)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    
+    if (latestError) {
+      logger.error(PREFIX, 'Supabase error finding latest uploadNumber:', latestError);
+      return null;
+    }
+    
+    if (!latestRow || latestRow.length === 0 || !latestRow[0].uploadNumber) {
+      logger.log(PREFIX, `No transcript with uploadNumber found for ${phoneNumber}`);
+      return null;
+    }
+    
+    const uploadNumber = latestRow[0].uploadNumber;
+    logger.log(PREFIX, `Latest uploadNumber: ${uploadNumber}`);
+    
+    // Step 2: Fetch ALL transcripts with that uploadNumber, ordered ASC (Video 1 = first uploaded)
+    const { data, error } = await supabase
+      .from('transcript')
+      .select('id, name, "phoneNumber", transcript, "uploadNumber", created_at')
+      .eq('uploadNumber', uploadNumber)
+      .order('created_at', { ascending: true });
+    
+    if (error) {
+      logger.error(PREFIX, 'Supabase error fetching upload group:', error);
+      return null;
+    }
+    
+    if (!data || data.length === 0) {
+      logger.log(PREFIX, `No transcripts found for uploadNumber: ${uploadNumber}`);
+      return null;
+    }
+    
+    logger.success(PREFIX, `Found ${data.length} transcript(s) for uploadNumber: ${uploadNumber}`);
+    
+    return data.map(record => ({
+      transcriptId: record.id,
+      name: record.name,
+      phoneNumber: record.phoneNumber,
+      transcript: record.transcript,
+      uploadNumber: record.uploadNumber,
+      createdAt: record.created_at
+    }));
+    
+  } catch (error) {
+    logger.error(PREFIX, 'Unexpected error in getTranscriptsByLatestUpload:', error);
+    return null;
+  }
+}
+
+/**
  * Upload file to Supabase storage bucket
  * @param {string} filePath - Local file path
  * @param {string} fileName - Original file name

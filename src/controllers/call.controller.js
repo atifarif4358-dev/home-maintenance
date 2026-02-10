@@ -5,7 +5,7 @@
 
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import { sendResponse, sendErrorResponse, sendDirectTransfer, getCallDetails } from '../services/retell.service.js';
-import { getTranscriptWithMetadata, fetchFramesByTranscriptId, getLastCallByPhone } from '../services/database.service.js';
+import { getTranscriptsByLatestUpload, fetchFramesByTranscriptId } from '../services/database.service.js';
 import { 
   createAgent, 
   createTechnicalSupportPrompt, 
@@ -26,8 +26,8 @@ export function handleWebSocketConnection(ws, callId) {
   logger.log(PREFIX, `New connection established for call: ${callId}`);
   
   let agent = null;
-  let conversationState = { messages: [], transcriptId: null, hasVideo: false };
-  let transcriptData = null;
+  let conversationState = { messages: [], transcriptIds: null, hasVideo: false };
+  let transcriptsData = null; // Array of transcript objects from the same upload
   let agentInitialized = false;
   let callStartTime = Date.now();
   let userPhoneNumber = null;
@@ -37,7 +37,6 @@ export function handleWebSocketConnection(ws, callId) {
   let transferInProgress = false; // Prevent multiple transfers
   let agentInitializing = false; // Prevent duplicate initialization
   let greetingSent = false; // Track if we've sent the first greeting
-  let previousCallContext = null; // Previous call transcript for callbacks
 
   /**
    * Fetch call details from Retell API and initialize agent
@@ -95,8 +94,9 @@ export function handleWebSocketConnection(ws, callId) {
       return;
     }
     
-    // Generate first message based on whether we have transcript or not, and if this is a callback
-    const firstMessage = generateFirstMessage(transcriptData?.transcript || null, previousCallContext);
+    // Generate first message based on whether we have transcripts or not
+    const videoCount = transcriptsData ? transcriptsData.length : 0;
+    const firstMessage = generateFirstMessage(videoCount);
     
     // Send the greeting with response_id: 0 (no prior user message)
     sendResponse(ws, firstMessage, 0);
@@ -118,18 +118,10 @@ export function handleWebSocketConnection(ws, callId) {
       return;
     }
 
-    // Check for previous call transcript (callback scenario) - queries Supabase (fast!)
-    if (phoneNumber) {
-      previousCallContext = await getLastCallByPhone(phoneNumber, callId);
-      if (previousCallContext) {
-        logger.success(PREFIX, `✓ CALLBACK DETECTED - Previous call found from ${Math.round((Date.now() - previousCallContext.endTime) / 60000)} minutes ago`);
-      }
-    }
-
     if (!phoneNumber) {
       // No phone number - configure as receptionist
       logger.info(PREFIX, 'Initializing as RECEPTIONIST (no phone number available)');
-      const systemPrompt = createReceptionistPrompt(previousCallContext);
+      const systemPrompt = createReceptionistPrompt();
       agent = await createAgent(systemPrompt, null, true); // Enable RAG even without video
       agentInitialized = true;
       return;
@@ -137,39 +129,48 @@ export function handleWebSocketConnection(ws, callId) {
     
     logger.info(PREFIX, `Initializing agent for caller: ${phoneNumber}`);
     
-    // Lookup transcript with metadata (includes transcript_id for frames)
-    transcriptData = await getTranscriptWithMetadata(phoneNumber);
-    logger.log(PREFIX, `Database query: ${transcriptData ? 'TRANSCRIPT FOUND ✓' : 'NO TRANSCRIPT ✗'}`);
+    // Lookup video transcripts by latest upload (retrieved in both previous & new work order cases)
+    transcriptsData = await getTranscriptsByLatestUpload(phoneNumber);
+    logger.log(PREFIX, `Database query: ${transcriptsData ? `${transcriptsData.length} TRANSCRIPT(S) FOUND ✓` : 'NO TRANSCRIPT ✗'}`);
     
-    if (transcriptData) {
-      // SCENARIO A: Transcript Found - Technical Support Agent with Video Tools
-      logger.success(PREFIX, `✓ TECHNICAL SUPPORT mode (Transcript ID: ${transcriptData.transcriptId})`);
+    if (transcriptsData && transcriptsData.length > 0) {
+      // SCENARIO A: Transcripts Found - Technical Support Agent with Video Tools
+      const transcriptIds = transcriptsData.map(t => t.transcriptId);
+      logger.success(PREFIX, `✓ TECHNICAL SUPPORT mode (${transcriptsData.length} video(s), IDs: ${transcriptIds.join(', ')})`);
       
-      // Check if frames are available
-      const frames = await fetchFramesByTranscriptId(transcriptData.transcriptId);
-      const hasFrames = frames && frames.length > 0;
-      
-      if (hasFrames) {
-        logger.success(PREFIX, `✓ Video available: ${frames.length} frames`);
-      } else {
-        logger.warn(PREFIX, 'No video frames for this transcript');
+      // Check if any video has frames
+      let hasFrames = false;
+      for (const t of transcriptsData) {
+        const frames = await fetchFramesByTranscriptId(t.transcriptId);
+        if (frames && frames.length > 0) {
+          hasFrames = true;
+          logger.success(PREFIX, `✓ Video ${transcriptIds.indexOf(t.transcriptId) + 1} has ${frames.length} frames`);
+        }
       }
       
-      // Update conversation state with transcript info
-      conversationState.transcriptId = transcriptData.transcriptId;
+      if (!hasFrames) {
+        logger.warn(PREFIX, 'No video frames for any transcript');
+      }
+      
+      // Update conversation state
+      conversationState.transcriptIds = transcriptIds;
       conversationState.hasVideo = hasFrames;
       
-      // Create system prompt with video tool instructions AND previous call context
-      const systemPrompt = createTechnicalSupportPrompt(transcriptData.transcript, hasFrames, previousCallContext);
+      // Build numbered transcript text for the prompt
+      const numberedTranscript = transcriptsData.map((t, i) => `Video ${i + 1}: "${t.transcript}"`).join('\n');
       
-      // Create agent with tools (video tools + RAG search + emergency)
-      agent = await createAgent(systemPrompt, hasFrames ? transcriptData.transcriptId : null, true, true);
+      // Create system prompt with video tool instructions
+      const systemPrompt = createTechnicalSupportPrompt(numberedTranscript, hasFrames, transcriptsData.length);
+      
+      // Create agent with tools - pass transcriptIds array for video tools
+      agent = await createAgent(systemPrompt, hasFrames ? transcriptIds : null, true, true, phoneNumber, callId);
       
     } else {
       // SCENARIO B: No Transcript - Receptionist Agent
       logger.info(PREFIX, 'ℹ RECEPTIONIST mode (no transcript for this number)');
-      const systemPrompt = createReceptionistPrompt(previousCallContext);
-      agent = await createAgent(systemPrompt, null, true, true); // Enable RAG + emergency
+      const systemPrompt = createReceptionistPrompt();
+      // Enable RAG + emergency + previous work order tool (phoneNumber & callId passed for tool binding)
+      agent = await createAgent(systemPrompt, null, true, true, phoneNumber, callId);
     }
     
     agentInitialized = true;

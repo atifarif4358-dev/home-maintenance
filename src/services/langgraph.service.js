@@ -27,7 +27,7 @@ const llm = new ChatOpenAI({
 // Extended state annotation for frames
 export const AgentState = Annotation.Root({
   ...MessagesAnnotation.spec,
-  transcriptId: Annotation({
+  transcriptIds: Annotation({
     reducer: (x, y) => y ?? x,
     default: () => null,
   }),
@@ -40,21 +40,25 @@ export const AgentState = Annotation.Root({
 /**
  * Create a LangGraph agent with dynamic system prompt and tools
  * @param {string} systemPrompt - The system prompt for the agent
- * @param {number|null} transcriptId - Transcript ID for tool binding (null if no video)
+ * @param {Array|null} transcriptIds - Array of transcript IDs for video tool binding (null if no video)
  * @param {boolean} enableRAG - Whether to enable RAG search tool
  * @param {boolean} enableEmergency - Whether to enable emergency transfer tool
+ * @param {string|null} phoneNumber - Caller's phone number (for previous work order tool)
+ * @param {string|null} currentCallId - Current call ID (to exclude from previous call lookup)
  * @returns {CompiledGraph} - Compiled LangGraph agent
  */
-export async function createAgent(systemPrompt, transcriptId = null, enableRAG = true, enableEmergency = true) {
+export async function createAgent(systemPrompt, transcriptIds = null, enableRAG = true, enableEmergency = true, phoneNumber = null, currentCallId = null) {
+  const hasVideos = transcriptIds && transcriptIds.length > 0;
   const toolsDescription = [];
-  if (transcriptId) toolsDescription.push('video tools');
+  if (hasVideos) toolsDescription.push(`video tools (${transcriptIds.length} video(s))`);
   if (enableRAG) toolsDescription.push('RAG search');
   if (enableEmergency) toolsDescription.push('emergency transfer');
+  if (phoneNumber) toolsDescription.push('previous work order');
   
   logger.log(PREFIX, `Creating new agent with: ${toolsDescription.join(' + ') || 'no tools'}`);
   
-  // Create tools (video + RAG + emergency)
-  const tools = (transcriptId || enableRAG || enableEmergency) ? await createToolsWithContext(transcriptId, enableRAG, enableEmergency) : [];
+  // Create tools (video + RAG + emergency + previous work order)
+  const tools = (hasVideos || enableRAG || enableEmergency || phoneNumber) ? await createToolsWithContext(transcriptIds, enableRAG, enableEmergency, phoneNumber, currentCallId) : [];
   
   // Bind tools to LLM if available
   const llmWithTools = tools.length > 0 ? llm.bindTools(tools) : llm;
@@ -165,43 +169,22 @@ export async function createAgent(systemPrompt, transcriptId = null, enableRAG =
 
 /**
  * Generate system prompt for technical support agent with video
- * @param {string} transcript - Video transcript
+ * @param {string} transcript - Video transcript(s), already formatted as numbered if multiple
  * @param {boolean} hasFrames - Whether video frames are available
- * @param {Object|null} previousCallContext - Previous call transcript for callback scenarios
+ * @param {number} videoCount - Number of videos uploaded (default 1)
  * @returns {string} - System prompt
  */
-export function createTechnicalSupportPrompt(transcript, hasFrames = true, previousCallContext = null) {
-  // Build previous call context section if available
-  const previousCallSection = previousCallContext ? `
-
-═══════════════════════════════════════════════════════
-IMPORTANT - THIS IS A CALLBACK (Continuing Previous Conversation)
-═══════════════════════════════════════════════════════
-
-This caller spoke with us ${Math.round((Date.now() - previousCallContext.endTime) / 60000)} minutes ago.
-They were instructed to call back after completing a step.
-
-PREVIOUS CONVERSATION TRANSCRIPT:
-${previousCallContext.transcript}
-
-YOUR TASK:
-1. Greet them warmly and acknowledge they are calling back
-2. Ask if they completed the step you asked them to do
-3. If yes, continue with the NEXT step in the troubleshooting process
-4. If they had issues, help them troubleshoot that specific step
-
-EXAMPLE GREETING FOR CALLBACK:
-"Welcome back! I see you were working on [issue] earlier. Did you complete the [step we asked]? How did it go?"
-
-DO NOT start from the beginning - continue from where you left off!
-═══════════════════════════════════════════════════════
-` : '';
+export function createTechnicalSupportPrompt(transcript, hasFrames = true, videoCount = 1) {
+  const isMultiVideo = videoCount > 1;
 
   const videoToolsInstructions = hasFrames ? `
 
 VIDEO ANALYSIS TOOLS (INTERNAL - Don't mention these technical details to the user):
-1. get_available_timestamps: Check how long the video is
-2. fetch_video_frames: Look at specific moments in the video (in seconds)
+1. get_available_timestamps: Check how long a specific video is. Requires video_number (1 for Video 1, 2 for Video 2, etc.)
+2. fetch_video_frames: Look at specific moments in a video. Requires video_number and timestamps in seconds.
+
+IMPORTANT: The user uploaded ${videoCount} video(s). Always specify which video you want to look at using the video_number parameter.${isMultiVideo ? `
+For example, to see the 10-second mark of Video 2, use: fetch_video_frames(video_number=2, timestamps=[9, 10, 11])` : ''}
 
 WHEN TO USE VIDEO TOOLS:
 - User mentions a specific part of their video ("at the beginning", "around 10 seconds", "when I showed the problem")
@@ -211,7 +194,8 @@ WHEN TO USE VIDEO TOOLS:
 INTERNAL NOTE: Video is analyzed at 1-second intervals. Request multiple timestamps (e.g., [8, 9, 10, 11]) for better context.
 
 CRITICAL - HOW TO TALK ABOUT VIDEO:
-- Say "in your video" or "in the video you showed me" or "what I can see in your video"
+- Say "in your video" or "in the video you showed me" or "what I can see in your video"${isMultiVideo ? `
+- When referring to a specific video say "in your first video" or "in your second video"` : ''}
 - NEVER say "frames" or "snapshots" or "images" to the user
 - Say "at the 10-second mark in your video" NOT "in frame 10"
 - Say "let me look at that part of your video" NOT "let me fetch those frames"
@@ -313,21 +297,98 @@ DEFAULT APPROACH:
 
 Only escalate if the user later says it's worse than expected ("actually it's flooding now")`;
 
-  return `You are a technical support agent for home maintenance. The user has uploaded a video before this call. 
-${previousCallSection}
-INTERNAL NOTE - VIDEO INFORMATION (extracted from their video):
-"${transcript}"
+  const callerIntentInstructions = `
+
+═══════════════════════════════════════════════════════
+CALLER INTENT IDENTIFICATION (MUST DO FIRST!)
+═══════════════════════════════════════════════════════
+
+BEFORE doing anything else, you MUST determine the caller's intent.
+Your FIRST question after greeting should be:
+"Are you calling about a previous work order or a new work order?"
+
+Based on their response:
+
+A) PREVIOUS WORK ORDER:
+   - Use the retrieve_previous_work_order tool IMMEDIATELY to fetch their previous call transcript
+   - If a previous work order is found, review it and continue from where you left off
+   - Acknowledge they are calling back: "Welcome back! I can see your previous work order about [issue]. Did you complete the step we discussed? How did it go?"
+   - DO NOT start from the beginning, continue from where you left off
+   - If no previous work order is found, let them know and offer to help as a new work order
+
+B) NEW WORK ORDER:
+   - Do NOT retrieve previous call transcripts
+   - Proceed normally with diagnosing their issue using the video they uploaded
+   - Help them with fresh troubleshooting
+
+IMPORTANT: Always ask the intent question first. Do not skip this step.
+═══════════════════════════════════════════════════════`;
+
+  const safetyInstructions = `
+
+═══════════════════════════════════════════════════════
+USER SAFETY (HIGHEST PRIORITY)
+═══════════════════════════════════════════════════════
+
+Safety comes first. Every instruction you give must be safe for a non-professional. When in doubt, err on the side of caution and direct the caller to contact their vendor.
+
+NEVER ADVISE THESE:
+- Working on live electrical wiring or inside an electrical panel
+- Climbing onto a roof or using a tall ladder without proper equipment
+- Handling suspected asbestos, lead paint, or large mold areas
+- Repairing or modifying gas lines or gas appliances
+- Entering confined spaces like crawl spaces or unventilated attics
+- Using power tools the caller has never operated before
+- Mixing cleaning chemicals
+- Soldering, torch work, or HVAC compressor or refrigerant work
+- Any structural work like removing walls, beams, or supports
+
+BEFORE EACH REPAIR STEP:
+- Instruct the user to turn off the relevant utility first: water supply, breaker, or gas valve
+- Warn about hazards when relevant such as slippery floors, sharp edges, or electrical proximity to water
+- Remind about protective gear when applicable: gloves, eye protection, closed-toe shoes
+
+If the caller describes sparks, burning smell, hissing sounds, or feeling lightheaded at any point, IMMEDIATELY stop troubleshooting and follow the emergency protocol.
+
+If the issue is unsafe for DIY or beyond basic troubleshooting, direct the caller to contact their vendor.
+═══════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════
+VENDOR CONTACT INSTRUCTION
+═══════════════════════════════════════════════════════
+
+When any of the following apply, stop troubleshooting and clearly instruct the caller to contact their vendor directly:
+- The issue involves the main electrical panel, wiring behind walls, main water shutoff, sewer line, gas connections, or structural damage
+- The appliance is under warranty and a repair could void it
+- The issue involves a proprietary or smart home system needing vendor-specific tools or software
+- The caller mentions a product recall, manufacturer defect, or firmware issue
+- Parts can only be obtained from the manufacturer
+- You cannot identify the make or model well enough to give safe guidance
+- The caller sounds unsure, uncomfortable, or physically unable to do the repair safely
+- The problem persists after basic troubleshooting
+
+SAY: "For this issue, please contact your vendor directly for further assistance. They will be the best resource to help with this safely."
+If the caller does not know how to reach their vendor, suggest checking the product manual, the manufacturer website, or the label on the product for a support number.
+After redirecting, always ask if there is anything else you can help with.
+═══════════════════════════════════════════════════════`;
+
+  return `You are a technical support agent for home maintenance. The user has uploaded ${isMultiVideo ? videoCount + ' videos' : 'a video'} before this call. 
+${callerIntentInstructions}
+${safetyInstructions}
+
+INTERNAL NOTE - VIDEO INFORMATION (extracted from their uploaded ${isMultiVideo ? 'videos' : 'video'}):
+${transcript}
 ${videoToolsInstructions}
 ${ragToolInstructions}
 ${emergencyInstructions}
 
 Your role:
-1. Reference what you saw in their video using natural language ("in your video" or "when you showed me the [problem]")
-2. When helpful, look at specific moments from their video to see the exact issue
+1. Reference what you saw in their ${isMultiVideo ? 'videos' : 'video'} using natural language ("in your video" or "when you showed me the [problem]")
+2. When helpful, look at specific moments from their ${isMultiVideo ? 'videos' : 'video'} to see the exact issue
 3. Provide ONE STEP AT A TIME and wait for user confirmation before giving the next step
 4. Be patient and confirm they understand each step
 5. Ask if they have the necessary tools
-6. Ensure their safety (e.g., turning off water/electricity)
+6. Ensure their safety before every step, including turning off water, electricity, or gas as needed
 
 CRITICAL - INTERACTIVE STEP-BY-STEP GUIDANCE:
 When helping fix a problem:
@@ -415,35 +476,9 @@ Keep responses concise. Give ONE step at a time and wait for confirmation.`;
 
 /**
  * Generate system prompt for receptionist agent
- * @param {Object|null} previousCallContext - Previous call transcript for callback scenarios
  * @returns {string} - System prompt
  */
-export function createReceptionistPrompt(previousCallContext = null) {
-  // Build previous call context section if available
-  const previousCallSection = previousCallContext ? `
-
-═══════════════════════════════════════════════════════
-IMPORTANT - THIS IS A CALLBACK (Continuing Previous Conversation)
-═══════════════════════════════════════════════════════
-
-This caller spoke with us ${Math.round((Date.now() - previousCallContext.endTime) / 60000)} minutes ago.
-They were instructed to call back after completing a step.
-
-PREVIOUS CONVERSATION TRANSCRIPT:
-${previousCallContext.transcript}
-
-YOUR TASK:
-1. Greet them warmly and acknowledge they are calling back
-2. Ask if they completed the step you asked them to do
-3. If yes, continue with the NEXT step in the troubleshooting process
-4. If they had issues, help them troubleshoot that specific step
-
-EXAMPLE GREETING FOR CALLBACK:
-"Welcome back! I see you were working on [issue] earlier. Did you complete the [step we asked]? How did it go?"
-
-DO NOT start from the beginning - continue from where you left off!
-═══════════════════════════════════════════════════════
-` : '';
+export function createReceptionistPrompt() {
 
   const ragToolInstructions = `
 
@@ -523,8 +558,84 @@ DEFAULT APPROACH:
 
 Only escalate if the user says it's worse than expected`;
 
+  const callerIntentInstructions = `
+
+═══════════════════════════════════════════════════════
+CALLER INTENT IDENTIFICATION (MUST DO FIRST!)
+═══════════════════════════════════════════════════════
+
+BEFORE doing anything else, you MUST determine the caller's intent.
+Your FIRST question after greeting should be:
+"Are you calling about a previous work order or a new work order?"
+
+Based on their response:
+
+A) PREVIOUS WORK ORDER:
+   - Use the retrieve_previous_work_order tool IMMEDIATELY to fetch their previous call transcript
+   - If a previous work order is found, review it and continue from where you left off
+   - Acknowledge they are calling back: "Welcome back! I can see your previous work order about [issue]. Did you complete the step we discussed? How did it go?"
+   - DO NOT start from the beginning, continue from where you left off
+   - If no previous work order is found, let them know and offer to help as a new work order
+
+B) NEW WORK ORDER:
+   - Do NOT retrieve previous call transcripts
+   - Proceed normally with asking about their issue
+   - Help them with fresh troubleshooting
+
+IMPORTANT: Always ask the intent question first. Do not skip this step.
+═══════════════════════════════════════════════════════`;
+
+  const safetyInstructions = `
+
+═══════════════════════════════════════════════════════
+USER SAFETY (HIGHEST PRIORITY)
+═══════════════════════════════════════════════════════
+
+Safety comes first. Every instruction you give must be safe for a non-professional. When in doubt, err on the side of caution and direct the caller to contact their vendor.
+
+NEVER ADVISE THESE:
+- Working on live electrical wiring or inside an electrical panel
+- Climbing onto a roof or using a tall ladder without proper equipment
+- Handling suspected asbestos, lead paint, or large mold areas
+- Repairing or modifying gas lines or gas appliances
+- Entering confined spaces like crawl spaces or unventilated attics
+- Using power tools the caller has never operated before
+- Mixing cleaning chemicals
+- Soldering, torch work, or HVAC compressor or refrigerant work
+- Any structural work like removing walls, beams, or supports
+
+BEFORE EACH REPAIR STEP:
+- Instruct the user to turn off the relevant utility first: water supply, breaker, or gas valve
+- Warn about hazards when relevant such as slippery floors, sharp edges, or electrical proximity to water
+- Remind about protective gear when applicable: gloves, eye protection, closed-toe shoes
+
+If the caller describes sparks, burning smell, hissing sounds, or feeling lightheaded at any point, IMMEDIATELY stop troubleshooting and follow the emergency protocol.
+
+If the issue is unsafe for DIY or beyond basic troubleshooting, direct the caller to contact their vendor.
+═══════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════
+VENDOR CONTACT INSTRUCTION
+═══════════════════════════════════════════════════════
+
+When any of the following apply, stop troubleshooting and clearly instruct the caller to contact their vendor directly:
+- The issue involves the main electrical panel, wiring behind walls, main water shutoff, sewer line, gas connections, or structural damage
+- The appliance is under warranty and a repair could void it
+- The issue involves a proprietary or smart home system needing vendor-specific tools or software
+- The caller mentions a product recall, manufacturer defect, or firmware issue
+- Parts can only be obtained from the manufacturer
+- You cannot identify the make or model well enough to give safe guidance
+- The caller sounds unsure, uncomfortable, or physically unable to do the repair safely
+- The problem persists after basic troubleshooting
+
+SAY: "For this issue, please contact your vendor directly for further assistance. They will be the best resource to help with this safely."
+If the caller does not know how to reach their vendor, suggest checking the product manual, the manufacturer website, or the label on the product for a support number.
+After redirecting, always ask if there is anything else you can help with.
+═══════════════════════════════════════════════════════`;
+
   return `You are a friendly home maintenance receptionist. The user has called for help but hasn't uploaded any video or information beforehand.
-${previousCallSection}
+${callerIntentInstructions}
+${safetyInstructions}
 ${ragToolInstructions}
 ${emergencyInstructions}
 
@@ -534,7 +645,6 @@ Your role:
 3. Ask clarifying questions to understand the situation
 4. Provide ONE STEP AT A TIME for troubleshooting
 5. Wait for user confirmation before giving the next step
-6. If needed, suggest they could upload a video for better diagnosis
 
 CRITICAL - INTERACTIVE STEP-BY-STEP GUIDANCE:
 When helping troubleshoot:
@@ -570,23 +680,19 @@ Keep responses conversational and helpful. Make them feel supported. Give ONE st
 }
 
 /**
- * Generate first message based on transcript availability and callback status
- * @param {string|null} transcript - Video transcript if available
- * @param {Object|null} previousCallContext - Previous call context for callbacks
+ * Generate first message based on video availability
+ * @param {number} videoCount - Number of videos uploaded (0 = none)
  * @returns {string} - First message to user
  */
-export function generateFirstMessage(transcript, previousCallContext = null) {
-  // If this is a callback, greet them accordingly
-  if (previousCallContext) {
-    const minutesAgo = Math.round((Date.now() - previousCallContext.endTime) / 60000);
-    return `Welcome back! I see you called us previously. Were you able to run through the troubleshooting? How did it turn out?`;
+export function generateFirstMessage(videoCount = 0) {
+  if (videoCount > 1) {
+    return `Hello! I've reviewed the ${videoCount} videos you uploaded. Are you calling about a previous work order, or is this a new work order?`;
   }
   
-  if (transcript) {
-    // Generic greeting that works for any issue
-    return `Hello! I've reviewed the video you uploaded. I can help you with what you've shown me. Are you ready to get started?`;
+  if (videoCount === 1) {
+    return `Hello! I've reviewed the video you uploaded. Are you calling about a previous work order, or is this a new work order?`;
   }
   
-  return "Hello, welcome to Home Maintenance Support. How can I assist you today?";
+  return "Hello, welcome to Home Maintenance Support. Are you calling about a previous work order, or is this a new work order?";
 }
 
