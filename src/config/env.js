@@ -23,6 +23,8 @@ export const config = {
     apiKey: process.env.RETELL_API_KEY,
     agentId: process.env.RETELL_AGENT_ID,
     phoneNumber: process.env.RETELL_PHONE_NUMBER,
+    /** When set, used as caller phone when testing via Retell web (no from_number). E.g. your real number that has transcripts. */
+    testPhoneNumber: process.env.RETELL_TEST_PHONE_NUMBER || null,
   },
 
   // OpenAI Configuration

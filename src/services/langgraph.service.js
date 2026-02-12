@@ -686,11 +686,11 @@ Keep responses conversational and helpful. Make them feel supported. Give ONE st
  */
 export function generateFirstMessage(videoCount = 0) {
   if (videoCount > 1) {
-    return `Hello! I've reviewed the ${videoCount} videos you uploaded. Are you calling about a previous work order, or is this a new work order?`;
+    return `Hello! welcome to Home Maintenance Support. Are you calling about a previous work order, or is this a new work order?`;
   }
   
   if (videoCount === 1) {
-    return `Hello! I've reviewed the video you uploaded. Are you calling about a previous work order, or is this a new work order?`;
+    return `Hello! welcome to Home Maintenance Support. Are you calling about a previous work order, or is this a new work order?`;
   }
   
   return "Hello, welcome to Home Maintenance Support. Are you calling about a previous work order, or is this a new work order?";

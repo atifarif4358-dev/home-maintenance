@@ -269,11 +269,12 @@ export async function getTranscriptsByLatestUpload(phoneNumber) {
     const uploadNumber = latestRow[0].uploadNumber;
     logger.log(PREFIX, `Latest uploadNumber: ${uploadNumber}`);
     
-    // Step 2: Fetch ALL transcripts with that uploadNumber, ordered ASC (Video 1 = first uploaded)
+    // Step 2: Fetch ALL transcripts with that uploadNumber and phoneNumber, ordered ASC (Video 1 = first uploaded)
     const { data, error } = await supabase
       .from('transcript')
       .select('id, name, "phoneNumber", transcript, "uploadNumber", created_at')
       .eq('uploadNumber', uploadNumber)
+      .eq('phoneNumber', phoneNumber)
       .order('created_at', { ascending: true });
     
     if (error) {

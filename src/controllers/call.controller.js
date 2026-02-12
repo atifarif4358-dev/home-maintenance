@@ -53,25 +53,35 @@ export function handleWebSocketConnection(ws, callId) {
       logger.log(PREFIX, '📞 Fetching call details from Retell API...');
       const callDetails = await getCallDetails(callId);
       
-      if (!callDetails.from_number) {
+      const effectivePhone = callDetails.from_number || config.retell.testPhoneNumber;
+      if (!effectivePhone) {
         throw new Error('No from_number in call details');
       }
-      
-      // Store phone number
-      userPhoneNumber = callDetails.from_number;
-      logger.success(PREFIX, `✓ Caller identified: ${userPhoneNumber}`);
-      
-      // Initialize agent with actual phone number
+
+      userPhoneNumber = effectivePhone;
+      if (!callDetails.from_number && config.retell.testPhoneNumber) {
+        logger.warn(PREFIX, `Retell web / no from_number: using test phone ${userPhoneNumber}`);
+      } else {
+        logger.success(PREFIX, `✓ Caller identified: ${userPhoneNumber}`);
+      }
+
       await initializeAgent(userPhoneNumber);
-      
-      // Send first message after agent is ready
+
       sendFirstGreeting();
       
     } catch (error) {
       logger.error(PREFIX, '❌ Failed to fetch call details:', error);
-      logger.warn(PREFIX, 'Initializing agent without phone number (receptionist mode)');
-      // Initialize as receptionist if we can't get phone number
-      await initializeAgent(null);
+      const fallbackPhone = config.retell.testPhoneNumber;
+      if (fallbackPhone) {
+        logger.warn(PREFIX, `Using test phone number for Retell web: ${fallbackPhone}`);
+        userPhoneNumber = fallbackPhone;
+        await initializeAgent(fallbackPhone);
+        sendFirstGreeting();
+      } else {
+        logger.warn(PREFIX, 'Initializing agent without phone number (receptionist mode)');
+        await initializeAgent(null);
+        sendFirstGreeting();
+      }
       
       // Send first message even in receptionist mode
       sendFirstGreeting();
