@@ -525,10 +525,10 @@ export async function saveCallHistory(callData) {
  * Get the last call for a phone number (for callback scenarios)
  * @param {string} phoneNumber - Caller's phone number
  * @param {string} currentCallId - Current call ID to exclude
- * @param {number} maxAgeMinutes - Maximum age in minutes (default: 120 = 2 hours)
+ * @param {number} maxAgeMinutes - Maximum age in minutes (default: 3600 = 24 hours)
  * @returns {Promise<Object|null>} - Previous call data or null
  */
-export async function getLastCallByPhone(phoneNumber, currentCallId = null, maxAgeMinutes = 120) {
+export async function getLastCallByPhone(phoneNumber, currentCallId = null, maxAgeMinutes = 3600) {
   try {
     logger.log(PREFIX, `Looking up previous calls for: ${phoneNumber}`);
     
@@ -579,4 +579,3 @@ export async function getLastCallByPhone(phoneNumber, currentCallId = null, maxA
     return null;
   }
 }
-

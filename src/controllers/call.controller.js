@@ -18,6 +18,46 @@ import { logger } from '../utils/logger.js';
 const PREFIX = 'CallController';
 
 /**
+ * Clean response text by removing markdown formatting and symbols
+ * This ensures phone calls don't have asterisks or other text symbols
+ * @param {string} text - Response text from agent
+ * @returns {string} - Cleaned text
+ */
+function cleanResponseText(text) {
+  if (!text || typeof text !== 'string') {
+    return text;
+  }
+  
+  // Remove markdown bold/italic (**, *)
+  let cleaned = text.replace(/\*\*/g, '').replace(/\*/g, '');
+  
+  // Remove markdown headers (#)
+  cleaned = cleaned.replace(/^#+\s+/gm, '');
+  
+  // Remove markdown links [text](url) -> text
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+  
+  // Remove markdown code blocks and inline code
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, '');
+  cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+  
+  // Remove markdown lists (-, *, •)
+  cleaned = cleaned.replace(/^[\s]*[-*•]\s+/gm, '');
+  
+  // Remove numbered lists with parentheses (1), 2), etc.)
+  cleaned = cleaned.replace(/^\d+[\.\)]\s+/gm, '');
+  
+  // Remove markdown emphasis (_)
+  cleaned = cleaned.replace(/_/g, '');
+  
+  // Clean up extra whitespace
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  cleaned = cleaned.trim();
+  
+  return cleaned;
+}
+
+/**
  * Handle WebSocket connection for LLM integration
  * @param {WebSocket} ws - WebSocket connection
  * @param {string} callId - Call ID from Retell
@@ -53,13 +93,15 @@ export function handleWebSocketConnection(ws, callId) {
       logger.log(PREFIX, '📞 Fetching call details from Retell API...');
       const callDetails = await getCallDetails(callId);
       
-      const effectivePhone = callDetails.from_number || config.retell.testPhoneNumber;
+      // const effectivePhone = callDetails.from_number || config.retell.testPhoneNumber;
+      const effectivePhone = callDetails.from_number
       if (!effectivePhone) {
         throw new Error('No from_number in call details');
       }
 
       userPhoneNumber = effectivePhone;
-      if (!callDetails.from_number && config.retell.testPhoneNumber) {
+      // if (!callDetails.from_number && config.retell.testPhoneNumber) {
+      if (!callDetails.from_number) {
         logger.warn(PREFIX, `Retell web / no from_number: using test phone ${userPhoneNumber}`);
       } else {
         logger.success(PREFIX, `✓ Caller identified: ${userPhoneNumber}`);
@@ -71,17 +113,17 @@ export function handleWebSocketConnection(ws, callId) {
       
     } catch (error) {
       logger.error(PREFIX, '❌ Failed to fetch call details:', error);
-      const fallbackPhone = config.retell.testPhoneNumber;
-      if (fallbackPhone) {
-        logger.warn(PREFIX, `Using test phone number for Retell web: ${fallbackPhone}`);
-        userPhoneNumber = fallbackPhone;
-        await initializeAgent(fallbackPhone);
-        sendFirstGreeting();
-      } else {
+      // const fallbackPhone = config.retell.testPhoneNumber;
+      // if (fallbackPhone) {
+      //   logger.warn(PREFIX, `Using test phone number for Retell web: ${fallbackPhone}`);
+      //   userPhoneNumber = fallbackPhone;
+      //   await initializeAgent(fallbackPhone);
+      //   sendFirstGreeting();
+      // } else {
         logger.warn(PREFIX, 'Initializing agent without phone number (receptionist mode)');
         await initializeAgent(null);
         sendFirstGreeting();
-      }
+      // }
       
       // Send first message even in receptionist mode
       sendFirstGreeting();
@@ -107,9 +149,10 @@ export function handleWebSocketConnection(ws, callId) {
     // Generate first message based on whether we have transcripts or not
     const videoCount = transcriptsData ? transcriptsData.length : 0;
     const firstMessage = generateFirstMessage(videoCount);
+    const cleanedFirstMessage = cleanResponseText(firstMessage);
     
     // Send the greeting with response_id: 0 (no prior user message)
-    sendResponse(ws, firstMessage, 0);
+    sendResponse(ws, cleanedFirstMessage, 0);
     
     // Add to conversation state
     conversationState.messages.push(new AIMessage(firstMessage));
@@ -385,13 +428,23 @@ export function handleWebSocketConnection(ws, callId) {
           return;
         }
         
+        // Clean response text to remove any markdown/symbols
+        const cleanedResponse = cleanResponseText(responseText);
+        
+        // Log if cleaning changed anything (for debugging)
+        if (cleanedResponse !== responseText) {
+          logger.warn(PREFIX, '⚠️ Removed formatting symbols from response');
+          logger.debug(PREFIX, `Original: "${responseText.substring(0, 100)}..."`);
+          logger.debug(PREFIX, `Cleaned: "${cleanedResponse.substring(0, 100)}..."`);
+        }
+        
         // Update conversation state
-        conversationState.messages.push(new AIMessage(responseText));
+        conversationState.messages.push(new AIMessage(cleanedResponse));
         
-        logger.log(PREFIX, `Agent responded: "${responseText}"`);
+        logger.log(PREFIX, `Agent responded: "${cleanedResponse}"`);
         
-        // Send response back to Retell
-        sendResponse(ws, responseText, data.response_id);
+        // Send cleaned response back to Retell
+        sendResponse(ws, cleanedResponse, data.response_id);
       }
       
       // ============================================================

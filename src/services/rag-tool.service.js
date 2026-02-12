@@ -55,19 +55,25 @@ export const searchKnowledgeBaseTool = tool(
   },
   {
     name: 'search_knowledge_base',
-    description: `Search the technical documentation and knowledge base for information about home maintenance repairs, troubleshooting steps, safety procedures, and technical specifications.
+    description: `CRITICAL: Search the uploaded technical documentation and knowledge base for SPECIFIC repair instructions, troubleshooting procedures, safety steps, and technical details.
+
+    ⚠️ ALWAYS USE THIS TOOL when the user mentions:
+    - HVAC systems, air conditioning, heating, furnaces, thermostats, air filters, ductwork
+    - Plumbing issues, pipes, water heaters, drains, faucets, toilets
+    - Electrical problems, outlets, switches, circuit breakers, wiring
+    - Appliances, refrigerators, dishwashers, washing machines, dryers
+    - Any specific repair procedure, troubleshooting step, or technical specification
     
-    Use this tool when:
-    - You need specific repair instructions or procedures
-    - User asks about a technical detail you're unsure about
-    - You need to verify safety steps or requirements
-    - You want to provide accurate technical specifications
+    IMPORTANT: Even if you think you know the answer, ALWAYS search the knowledge base FIRST to provide accurate, document-specific guidance. The uploaded documentation may contain specific procedures, safety requirements, or troubleshooting steps that differ from general knowledge.
     
-    Examples:
-    - "How to replace HVAC air filter"
-    - "Electrical safety procedures before repair"
-    - "Troubleshooting steps for water heater not heating"
-    - "Required tools for pipe replacement"`,
+    Use this tool BEFORE providing any detailed technical instructions or troubleshooting steps.
+    
+    Examples of when to use:
+    - User: "My HVAC system isn't working" → Search for "HVAC troubleshooting"
+    - User: "How do I replace an air filter?" → Search for "HVAC air filter replacement"
+    - User: "My water heater won't heat" → Search for "water heater troubleshooting"
+    - User: "Electrical outlet not working" → Search for "electrical outlet repair"
+    - User: "Pipe is leaking" → Search for "pipe leak repair"`,
     schema: z.object({
       query: z.string().describe('Your search query - be specific about what information you need from the documentation'),
     }),

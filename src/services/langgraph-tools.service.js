@@ -168,7 +168,7 @@ export const retrievePreviousWorkOrderTool = tool(
         logger.log(PREFIX, 'No previous work order found for this caller');
         return JSON.stringify({ 
           found: false, 
-          message: 'No previous work order found for this caller. They may be a new caller or their last call was more than 2 hours ago.' 
+          message: 'No previous work order found for this caller. They may be a new caller or their last call was more than 24 hours ago.' 
         });
       }
       
